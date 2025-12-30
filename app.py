@@ -1,69 +1,61 @@
-import streamlit as st 
+import streamlit as st
+import re
+from collections import Counter
 
 # -----------------------------
-# PAGE SETUP
+# PAGE CONFIG
 # -----------------------------
-st.set_page_config(page_title="Job Application Intelligence Engine", layout="wide")
+st.set_page_config(
+    page_title="Job Application Intelligence Engine",
+    layout="wide"
+)
+
 st.title("🧠 Job Application Intelligence Engine")
-
-st.write("Analyze your CV against a job description and get recruiter-ready insights.")
-
-# -----------------------------
-# JOB REQUIREMENTS (STATIC FOR NOW)
-# -----------------------------
-job_requirements = {
-    "core_skills": ["klaviyo", "email marketing", "flows", "segmentation", "a/b testing"],
-    "supporting_skills": ["shopify", "analytics", "copywriting", "design collaboration"],
-    "tools": ["shopify", "facebook ads", "google analytics"]
-}
-
-skill_synonyms = {
-    "email marketing": ["email automation", "email campaigns"],
-    "flows": ["automation", "workflows"],
-    "segmentation": ["audience segmentation"],
-    "a/b testing": ["split testing"],
-    "analytics": ["data analysis", "reporting"]
-}
+st.caption("Role-agnostic CV vs Job Description analysis")
 
 # -----------------------------
-# FUNCTIONS
+# SIMPLE SKILL EXTRACTION
 # -----------------------------
-def normalize_skills(skills):
-    normalized = set(skills)
-    for main, synonyms in skill_synonyms.items():
-        for s in skills:
-            for syn in synonyms:
-                if syn in s:
-                    normalized.add(main)
-    return list(normalized)
+STOPWORDS = set([
+    "and", "or", "with", "for", "the", "a", "an", "to", "of", "in",
+    "experience", "skills", "ability", "strong", "working", "knowledge"
+])
 
-def generate_risk_flags(missing):
-    flags = []
-    if "klaviyo" in missing:
-        flags.append("No direct Klaviyo experience")
-    if len(missing) >= 3:
-        flags.append("Multiple core skill gaps")
-    return flags
+def extract_skills(text):
+    text = text.lower()
+    words = re.findall(r"[a-zA-Z+#\.]{2,}", text)
+    skills = [w for w in words if w not in STOPWORDS]
+    return Counter(skills)
 
-def calculate_fit(job, skills):
+# -----------------------------
+# FIT CALCULATION
+# -----------------------------
+def analyze_fit(job_text, cv_text):
+    job_skills = extract_skills(job_text)
+    cv_skills = extract_skills(cv_text)
 
-    def score(req, weight):
-        matched = [s for s in req if any(s in cv for cv in skills)]
-        return (len(matched) / len(req)) * weight, matched
+    job_skill_set = set(job_skills.keys())
+    cv_skill_set = set(cv_skills.keys())
 
-    core_score, core_matched = score(job["core_skills"], 50)
-    sup_score, sup_matched = score(job["supporting_skills"], 30)
-    tool_score, tool_matched = score(job["tools"], 20)
+    matched = job_skill_set.intersection(cv_skill_set)
+    missing = job_skill_set - cv_skill_set
 
-    missing = list(set(job["core_skills"]) - set(core_matched))
+    if len(job_skill_set) == 0:
+        fit_score = 0
+    else:
+        fit_score = round((len(matched) / len(job_skill_set)) * 100, 2)
+
+    risk_flags = []
+    if fit_score < 40:
+        risk_flags.append("Low alignment with job requirements")
+    if len(missing) >= 5:
+        risk_flags.append("Multiple missing role-critical skills")
 
     return {
-        "fit_score": round(core_score + sup_score + tool_score, 2),
-        "core_matched": core_matched,
-        "missing_core": missing,
-        "supporting_matched": sup_matched,
-        "tools_matched": tool_matched,
-        "risk_flags": generate_risk_flags(missing)
+        "fit_score": fit_score,
+        "matched_skills": sorted(list(matched)),
+        "missing_skills": sorted(list(missing)),
+        "risk_flags": risk_flags
     }
 
 # -----------------------------
@@ -72,40 +64,53 @@ def calculate_fit(job, skills):
 col1, col2 = st.columns(2)
 
 with col1:
-    cv_input = st.text_area("📄 Paste your CV skills / experience", height=250)
+    job_description = st.text_area(
+        "🧾 Paste Job Description",
+        height=300,
+        placeholder="Paste the full job description here..."
+    )
 
 with col2:
-    jd_input = st.text_area("🧾 Paste the Job Description (optional for now)", height=250)
+    cv_text = st.text_area(
+        "📄 Paste Your CV / Experience",
+        height=300,
+        placeholder="Paste your CV or key experience here..."
+    )
 
 # -----------------------------
 # RUN ANALYSIS
 # -----------------------------
 if st.button("Analyze Fit"):
+    if not job_description or not cv_text:
+        st.warning("Please paste both the job description and your CV.")
+    else:
+        result = analyze_fit(job_description, cv_text)
 
-    cv_skills = [s.strip().lower() for s in cv_input.split(",") if s.strip()]
-    cv_skills = normalize_skills(cv_skills)
+        st.subheader("📊 Fit Score")
+        st.metric("Overall Match", f"{result['fit_score']} / 100")
 
-    result = calculate_fit(job_requirements, cv_skills)
+        st.subheader("✅ Matched Skills")
+        st.write(result["matched_skills"])
 
-    st.subheader("📊 Fit Score")
-    st.metric("Overall Match", f"{result['fit_score']} / 100")
+        st.subheader("❌ Missing Skills")
+        st.write(result["missing_skills"])
 
-    st.subheader("✅ Matched Core Skills")
-    st.write(result["core_matched"])
+        st.subheader("⚠️ Recruiter Risk Flags")
+        if result["risk_flags"]:
+            for r in result["risk_flags"]:
+                st.write(f"- {r}")
+        else:
+            st.write("No major risks identified")
 
-    st.subheader("❌ Missing Core Skills")
-    st.write(result["missing_core"])
+        st.subheader("🗣 Recruiter Talking Points")
+        st.write(
+            "The candidate demonstrates overlap with key job requirements and shows "
+            "transferable skills that can be ramped quickly with role-specific onboarding."
+        )
 
-    st.subheader("⚠️ Risk Flags")
-    st.write(result["risk_flags"])
-
-    st.subheader("🗣 Recruiter Talking Points")
-    for r in result["risk_flags"]:
-        st.write(f"- {r}")
-
-    st.subheader("✍️ Cover Letter Starter")
-    st.write(
-        "I’m excited to apply for this role, bringing strong experience in email automation "
-        "and workflow-driven systems. While I continue expanding my hands-on Klaviyo expertise, "
-        "I adapt quickly to new platforms and focus on data-backed optimization."
-    )
+        st.subheader("✍️ Cover Letter Starter")
+        st.write(
+            "I am excited to apply for this role, bringing experience that aligns with several "
+            "of your core requirements. While I continue strengthening certain areas, I have "
+            "a proven ability to learn quickly and deliver results in dynamic environments."
+        )
