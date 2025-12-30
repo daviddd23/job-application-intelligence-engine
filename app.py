@@ -1,62 +1,71 @@
 import streamlit as st
 import re
 from collections import Counter
+from openai import OpenAI
 
 # -----------------------------
 # PAGE CONFIG
 # -----------------------------
-st.set_page_config(
-    page_title="Job Application Intelligence Engine",
-    layout="wide"
-)
-
+st.set_page_config(page_title="Job Application Intelligence Engine", layout="wide")
 st.title("🧠 Job Application Intelligence Engine")
-st.caption("Role-agnostic CV vs Job Description analysis")
+st.caption("AI-powered CV vs Job Description analysis")
+
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # -----------------------------
-# SIMPLE SKILL EXTRACTION
+# SKILL EXTRACTION
 # -----------------------------
-STOPWORDS = set([
-    "and", "or", "with", "for", "the", "a", "an", "to", "of", "in",
-    "experience", "skills", "ability", "strong", "working", "knowledge"
-])
+STOPWORDS = {
+    "and","or","with","for","the","a","an","to","of","in","experience",
+    "skills","ability","strong","working","knowledge"
+}
 
 def extract_skills(text):
-    text = text.lower()
-    words = re.findall(r"[a-zA-Z+#\.]{2,}", text)
-    skills = [w for w in words if w not in STOPWORDS]
-    return Counter(skills)
+    words = re.findall(r"[a-zA-Z+#\.]{2,}", text.lower())
+    return Counter([w for w in words if w not in STOPWORDS])
 
 # -----------------------------
-# FIT CALCULATION
+# CORE ANALYSIS
 # -----------------------------
 def analyze_fit(job_text, cv_text):
-    job_skills = extract_skills(job_text)
-    cv_skills = extract_skills(cv_text)
+    job = extract_skills(job_text)
+    cv = extract_skills(cv_text)
 
-    job_skill_set = set(job_skills.keys())
-    cv_skill_set = set(cv_skills.keys())
+    job_set, cv_set = set(job), set(cv)
+    matched = job_set & cv_set
+    missing = job_set - cv_set
 
-    matched = job_skill_set.intersection(cv_skill_set)
-    missing = job_skill_set - cv_skill_set
+    score = round((len(matched) / len(job_set)) * 100, 2) if job_set else 0
 
-    if len(job_skill_set) == 0:
-        fit_score = 0
-    else:
-        fit_score = round((len(matched) / len(job_skill_set)) * 100, 2)
+    return score, matched, missing
 
-    risk_flags = []
-    if fit_score < 40:
-        risk_flags.append("Low alignment with job requirements")
-    if len(missing) >= 5:
-        risk_flags.append("Multiple missing role-critical skills")
+# -----------------------------
+# GPT INSIGHTS
+# -----------------------------
+def gpt_insights(score, matched, missing):
+    prompt = f"""
+You are a recruiter.
 
-    return {
-        "fit_score": fit_score,
-        "matched_skills": sorted(list(matched)),
-        "missing_skills": sorted(list(missing)),
-        "risk_flags": risk_flags
-    }
+Candidate fit score: {score}/100
+
+Matched skills: {list(matched)}
+Missing skills: {list(missing)}
+
+Explain:
+1. Why the score is what it is
+2. How the candidate should position themselves
+3. What to improve on the CV
+4. Recruiter talking points
+5. Write a short tailored cover letter
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role":"user","content":prompt}],
+        temperature=0.4
+    )
+
+    return response.choices[0].message.content
 
 # -----------------------------
 # INPUTS
@@ -64,53 +73,30 @@ def analyze_fit(job_text, cv_text):
 col1, col2 = st.columns(2)
 
 with col1:
-    job_description = st.text_area(
-        "🧾 Paste Job Description",
-        height=300,
-        placeholder="Paste the full job description here..."
-    )
+    job_description = st.text_area("🧾 Job Description", height=300)
 
 with col2:
-    cv_text = st.text_area(
-        "📄 Paste Your CV / Experience",
-        height=300,
-        placeholder="Paste your CV or key experience here..."
-    )
+    cv_text = st.text_area("📄 Your CV", height=300)
 
 # -----------------------------
-# RUN ANALYSIS
+# RUN
 # -----------------------------
 if st.button("Analyze Fit"):
     if not job_description or not cv_text:
-        st.warning("Please paste both the job description and your CV.")
+        st.warning("Please fill in both fields.")
     else:
-        result = analyze_fit(job_description, cv_text)
+        score, matched, missing = analyze_fit(job_description, cv_text)
 
         st.subheader("📊 Fit Score")
-        st.metric("Overall Match", f"{result['fit_score']} / 100")
+        st.metric("Overall Match", f"{score} / 100")
 
         st.subheader("✅ Matched Skills")
-        st.write(result["matched_skills"])
+        st.write(list(matched))
 
         st.subheader("❌ Missing Skills")
-        st.write(result["missing_skills"])
+        st.write(list(missing))
 
-        st.subheader("⚠️ Recruiter Risk Flags")
-        if result["risk_flags"]:
-            for r in result["risk_flags"]:
-                st.write(f"- {r}")
-        else:
-            st.write("No major risks identified")
-
-        st.subheader("🗣 Recruiter Talking Points")
-        st.write(
-            "The candidate demonstrates overlap with key job requirements and shows "
-            "transferable skills that can be ramped quickly with role-specific onboarding."
-        )
-
-        st.subheader("✍️ Cover Letter Starter")
-        st.write(
-            "I am excited to apply for this role, bringing experience that aligns with several "
-            "of your core requirements. While I continue strengthening certain areas, I have "
-            "a proven ability to learn quickly and deliver results in dynamic environments."
-        )
+        st.subheader("🧠 AI Recruiter Insights")
+        with st.spinner("Thinking like a recruiter..."):
+            insights = gpt_insights(score, matched, missing)
+            st.write(insights)
