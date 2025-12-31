@@ -1,127 +1,176 @@
 import streamlit as st
-import openai
 import re
 
 # -------------------------------
-# CONFIG
+# PAGE CONFIG
 # -------------------------------
-st.set_page_config(page_title="Job Application Intelligence Engine", layout="wide")
-
-st.title("🧠 Job Application Intelligence Engine")
-st.caption("AI-powered CV vs Job Description analysis")
-
-# -------------------------------
-# API KEY (Streamlit Secrets)
-# -------------------------------
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+st.set_page_config(
+    page_title="Job Application Intelligence Engine",
+    layout="wide"
+)
 
 # -------------------------------
-# GPT: Extract JD Intelligence
+# SESSION STATE INITIALIZATION
 # -------------------------------
-def extract_jd_skills(jd_text):
-    prompt = f"""
-    Extract key skills, tools, and competencies from this job description.
-    Return ONLY a comma-separated list.
+if "score" not in st.session_state:
+    st.session_state.score = 0
 
-    Job Description:
-    {jd_text}
-    """
+if "core_matched" not in st.session_state:
+    st.session_state.core_matched = []
 
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
+if "missing_core" not in st.session_state:
+    st.session_state.missing_core = []
 
-    skills_text = response.choices[0].message["content"].lower()
-    return [s.strip() for s in skills_text.split(",") if s.strip()]
+if "analysis_done" not in st.session_state:
+    st.session_state.analysis_done = False
 
 # -------------------------------
-# MATCHING LOGIC
+# SKILL EXTRACTION LOGIC
 # -------------------------------
-def extract_cv_skills(cv_text):
-    return set(re.findall(r"[a-zA-Z+/]+", cv_text.lower()))
-
-# -------------------------------
-# ANALYSIS
-# -------------------------------
-def analyze_fit(cv_text, jd_text):
-    jd_skills = set(extract_jd_skills(jd_text))
-    cv_skills = extract_cv_skills(cv_text)
-
-    matched = sorted(jd_skills & cv_skills)
-    missing = sorted(jd_skills - cv_skills)
-
-    score = round((len(matched) / len(jd_skills)) * 100, 2) if jd_skills else 0
-
-    return score, matched, missing
-
-# -------------------------------
-# CV IMPROVEMENT SUGGESTIONS
-# -------------------------------
-def cv_suggestions(missing):
-    return [
-        f"Add experience or projects demonstrating **{skill}**."
-        for skill in missing
+def extract_skills(text):
+    skills = [
+        "python", "sql", "excel", "power bi", "tableau",
+        "data analysis", "machine learning", "ai",
+        "marketing", "email marketing", "seo", "content",
+        "sales", "crm", "lead generation",
+        "project management", "agile", "scrum",
+        "communication", "presentation", "stakeholder",
+        "finance", "trading", "risk management",
+        "software development", "javascript", "react",
+        "cloud", "aws", "azure", "docker"
     ]
 
+    found = []
+    text = text.lower()
+
+    for skill in skills:
+        if re.search(rf"\b{re.escape(skill)}\b", text):
+            found.append(skill)
+
+    return list(set(found))
+
 # -------------------------------
-# COVER LETTER
+# FIT ANALYSIS
 # -------------------------------
-def generate_cover_letter(cv_text, jd_text):
-    prompt = f"""
-    Write a short, professional cover letter tailored to the job description.
+def analyze_fit(cv_text, jd_text):
+    jd_skills = extract_skills(jd_text)
+    cv_skills = extract_skills(cv_text)
 
-    CV:
-    {cv_text}
+    core_matched = [s for s in jd_skills if s in cv_skills]
+    missing_core = [s for s in jd_skills if s not in cv_skills]
 
-    Job Description:
-    {jd_text}
-    """
+    if len(jd_skills) == 0:
+        score = 0
+    else:
+        score = round((len(core_matched) / len(jd_skills)) * 100, 1)
 
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.4
-    )
-
-    return response.choices[0].message["content"]
+    return score, core_matched, missing_core
 
 # -------------------------------
 # UI
 # -------------------------------
-jd_text = st.text_area("📌 Paste Job Description", height=220)
-cv_text = st.text_area("📄 Paste Your CV", height=220)
+st.title("🧠 Job Application Intelligence Engine")
+st.caption("AI-inspired analysis of CVs vs Job Descriptions")
 
+col1, col2 = st.columns(2)
+
+with col1:
+    jd_text = st.text_area("📄 Paste Job Description", height=250)
+
+with col2:
+    cv_text = st.text_area("👤 Paste Your CV", height=250)
+
+# -------------------------------
+# ANALYZE BUTTON
+# -------------------------------
 if st.button("🔍 Analyze Fit"):
-    if not jd_text or not cv_text:
-        st.warning("Please paste both the job description and your CV.")
-        st.stop()
+    if jd_text.strip() == "" or cv_text.strip() == "":
+        st.warning("Please paste both the Job Description and your CV.")
+    else:
+        score, core_matched, missing_core = analyze_fit(cv_text, jd_text)
 
-    score, core_matched, missing_core = analyze_fit(cv_text, jd_text)
+        st.session_state.score = score
+        st.session_state.core_matched = core_matched
+        st.session_state.missing_core = missing_core
+        st.session_state.analysis_done = True
 
+# -------------------------------
+# RESULTS
+# -------------------------------
+if st.session_state.analysis_done:
+
+    st.divider()
     st.subheader("📊 Fit Score")
-    st.metric("Match Percentage", f"{score}%")
+    st.metric("Overall Match (%)", st.session_state.score)
 
-    col1, col2 = st.columns(2)
+    # -------------------------------
+    # MATCHED SKILLS
+    # -------------------------------
+    st.subheader("✅ Matched Skills")
+    if st.session_state.core_matched:
+        for skill in st.session_state.core_matched:
+            st.write(f"• {skill.title()}")
+    else:
+        st.write("No direct skill matches found.")
 
-    with col1:
-        st.subheader("✅ Matched Skills")
-        st.write(core_matched if core_matched else "No strong matches detected.")
+    # -------------------------------
+    # MISSING SKILLS
+    # -------------------------------
+    st.subheader("⚠️ Missing Skills")
+    if st.session_state.missing_core:
+        for skill in st.session_state.missing_core:
+            st.write(f"• {skill.title()}")
+    else:
+        st.write("No major skill gaps detected.")
 
-    with col2:
-        st.subheader("❌ Missing Skills")
-        st.write(missing_core if missing_core else "No major gaps found.")
+    # -------------------------------
+    # CV IMPROVEMENT SUGGESTIONS
+    # -------------------------------
+    st.divider()
+    st.subheader("🛠️ CV Improvement Suggestions")
 
-    st.subheader("🛠 CV Improvement Suggestions")
-    for tip in cv_suggestions(missing_core):
-        st.write(f"- {tip}")
+    if st.session_state.missing_core:
+        for skill in st.session_state.missing_core:
+            st.write(
+                f"- Add a bullet point demonstrating experience, exposure, or coursework in **{skill.title()}**."
+            )
+    else:
+        st.write("Your CV already aligns strongly with this role.")
 
+    # -------------------------------
+    # COVER LETTER
+    # -------------------------------
+    st.divider()
+    st.subheader("✉️ Tailored Cover Letter (Draft)")
+
+    cover_letter = f"""
+Dear Hiring Manager,
+
+I am excited to apply for this role, as my background strongly aligns with the key requirements outlined in the job description.
+
+I bring hands-on experience in {", ".join(st.session_state.core_matched) if st.session_state.core_matched else "relevant transferable skills"}, and I am actively strengthening my capabilities in areas such as {", ".join(st.session_state.missing_core) if st.session_state.missing_core else "the full skill set required for this role"}.
+
+I am confident that my ability to learn quickly, communicate effectively, and deliver results would allow me to add value to your team from day one.
+
+Kind regards,  
+Your Name
+"""
+    st.text_area("Generated Cover Letter", cover_letter, height=220)
+
+    # -------------------------------
+    # RECRUITER TALKING POINTS
+    # -------------------------------
+    st.divider()
     st.subheader("💬 Recruiter Talking Points")
-    for skill in core_matched:
-        st.write(f"- Demonstrated experience in **{skill}**.")
-    for skill in missing_core:
-        st.write(f"- Actively developing skills in **{skill}**.")
 
-    st.subheader("✉️ Generated Cover Letter")
-    st.write(generate_cover_letter(cv_text, jd_text))
+    if st.session_state.core_matched:
+        st.write("**Strengths to Highlight:**")
+        for skill in st.session_state.core_matched:
+            st.write(f"- Proven experience in **{skill.title()}**")
+
+    if st.session_state.missing_core:
+        st.write("**How to Address Gaps:**")
+        for skill in st.session_state.missing_core:
+            st.write(
+                f"- Currently developing **{skill.title()}** through self-study, projects, or practical exposure"
+            )
