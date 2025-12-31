@@ -1,220 +1,153 @@
 import streamlit as st
-import openai
-import json
 import re
+from openai import OpenAI
 
-# -----------------------------
-# CONFIG
-# -----------------------------
-st.set_page_config(page_title="Job Application Intelligence Engine", layout="wide")
-
-st.title("🧠 JOB APPLICATION  INTELLIGENCE ENGINE")
-st.caption("AI-powered analysis of CVs vs Job Descriptions")
-
-# -----------------------------
-# API KEY
-# -----------------------------
-openai.api_key = st.secrets.get("OPENAI_API_KEY")
-
-if not openai.api_key:
-    st.error("❌ OpenAI API key not found. Add it in Streamlit Secrets.")
-    st.stop()
-
-# -----------------------------
-# INPUTS
-# -----------------------------
-job_description = st.text_area("📄 Paste Job Description", height=250)
-cv_text = st.text_area("📄 Paste Your CV", height=250)
-
-analyze_btn = st.button("🔍 Analyze Fit")
-
-# -----------------------------
-# GPT: Extract JD Intelligence
-# -----------------------------
-def extract_jd_intelligence(jd_text):
-    prompt = f"""
-You are a senior recruiter.
-
-From the job description below, extract structured hiring requirements.
-
-Return STRICT JSON with:
-- core_skills (list)
-- tools (list)
-- soft_skills (list)
-- experience_level (string)
-
-JOB DESCRIPTION:
-{jd_text}
-"""
-
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You extract structured hiring requirements."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0
-    )
-
-    content = response.choices[0].message.content
-    return json.loads(content)
-
-# -----------------------------
-# MATCHING LOGIC
-# -----------------------------
-def normalize(text):
-    return re.sub(r"[^a-z0-9 ]", "", text.lower())
-
-def match_items(source, target_text):
-    matched = []
-    for item in source:
-        if normalize(item) in normalize(target_text):
-            matched.append(item)
-    return matched
-
-def calculate_fit(core, tools, cv):
-    core_matches = match_items(core, cv)
-    tool_matches = match_items(tools, cv)
-
-    score = 0
-    if core:
-        score += (len(core_matches) / len(core)) * 60
-    if tools:
-        score += (len(tool_matches) / len(tools)) * 40
-
-    return round(score, 1), core_matches, tool_matches
-
-# -----------------------------
-# ANALYSIS
-# -----------------------------
-if analyze_btn and job_description and cv_text:
-    with st.spinner("🧠 Analyzing like a recruiter..."):
-        jd_data = extract_jd_intelligence(job_description)
-
-        fit_score, core_matched, tools_matched = calculate_fit(
-            jd_data["core_skills"],
-            jd_data["tools"],
-            cv_text
-        )
-
-        missing_core = list(set(jd_data["core_skills"]) - set(core_matched))
-
-        risk_flags = []
-        if fit_score < 40:
-            risk_flags.append("Low overall alignment")
-        if missing_core:
-            risk_flags.append("Missing key core skills")
-
-    # -----------------------------
-    # OUTPUT
-    # -----------------------------
-    st.subheader("📊 Fit Score")
-    st.metric("Overall Match (%)", fit_score)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("✅ Matched Core Skills")
-        st.write(core_matched or "None")
-
-        st.subheader("🛠 Matched Tools")
-        st.write(tools_matched or "None")
-
-    with col2:
-        st.subheader("❌ Missing Core Skills")
-        st.write(missing_core or "None")
-
-        st.subheader("⚠️ Risk Flags")
-        st.write(risk_flags or "None")
-
-    # -----------------------------
-    # CV IMPROVEMENT SUGGESTIONS
-    # -----------------------------
-    st.subheader("📝 CV Improvement Suggestions")
-
-    improvement_prompt = f"""
-You are a hiring manager.
-
-Job requirements:
-{jd_data}
-
-Candidate CV:
-{cv_text}
-
-Give concise, actionable CV improvement suggestions.
-"""
-
-    improve_resp = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You improve CVs for job alignment."},
-            {"role": "user", "content": improvement_prompt}
-        ],
-        temperature=0.3
-    )
-
-    st.write(improve_resp.choices[0].message.content)
-
-    # -----------------------------
-    # COVER LETTER
-    # -----------------------------
-    st.subheader("✉️ Tailored Cover Letter")
-
-    cover_prompt = f"""
-Write a concise,human, professional cover letter for this job.
-
-Job Description:
-{job_description}
-
-Candidate CV:
-{cv_text}
-"""
-
-    cover_resp = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You write recruiter-ready cover letters."},
-            {"role": "user", "content": cover_prompt}
-        ],
-        temperature=0.4
-    )
-
-    st.write(cover_resp.choices[0].message.content)
-    # -----------------------------
-# RECRUITER TALKING POINTS
-# -----------------------------
-st.subheader("🗣️ Recruiter Talking Points")
-
-talking_points_prompt = f"""
-You are a recruiter coaching a candidate.
-
-Job Description:
-{job_description}
-
-Candidate CV:
-{cv_text}
-
-Matched Skills:
-{core_matched}
-
-Missing Skills:
-{missing_core}
-
-Generate 4–5 concise recruiter talking points the candidate can say confidently.
-Each point should:
-- Sound natural
-- Emphasize strengths
-- Address gaps intelligently (without lying)
-"""
-
-talking_resp = openai.ChatCompletion.create(
-    model="gpt-4o-mini",
-    messages=[
-        {"role": "system", "content": "You coach candidates for recruiter conversations."},
-        {"role": "user", "content": talking_points_prompt}
-    ],
-    temperature=0.4
+# -----------------------------------
+# PAGE CONFIG
+# -----------------------------------
+st.set_page_config(
+    page_title="Job Application Intelligence Engine",
+    layout="wide"
 )
 
-st.write(talking_resp.choices[0].message.content)
+st.title("🧠 Job Application Intelligence Engine")
+st.caption("AI-powered CV analysis against any job description")
 
+# -----------------------------------
+# API KEY
+# -----------------------------------
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+# -----------------------------------
+# GPT: Extract JD Intelligence
+# -----------------------------------
+def extract_jd_skills(jd_text):
+    prompt = f"""
+    Extract the core skills, tools, and competencies required from this job description.
+    Return them as a clean comma-separated list.
+
+    Job Description:
+    {jd_text}
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    skills = response.choices[0].message.content.lower()
+    return [s.strip() for s in skills.split(",") if s.strip()]
+
+# -----------------------------------
+# MATCHING LOGIC
+# -----------------------------------
+def extract_cv_skills(cv_text):
+    words = re.findall(r"[a-zA-Z+/]+", cv_text.lower())
+    return set(words)
+
+# -----------------------------------
+# ANALYSIS
+# -----------------------------------
+def analyze_fit(cv_text, jd_text):
+    jd_skills = set(extract_jd_skills(jd_text))
+    cv_skills = extract_cv_skills(cv_text)
+
+    matched = sorted(jd_skills.intersection(cv_skills))
+    missing = sorted(jd_skills.difference(cv_skills))
+
+    fit_score = round((len(matched) / len(jd_skills)) * 100, 2) if jd_skills else 0
+
+    return {
+        "fit_score": fit_score,
+        "core_matched": matched,
+        "missing_core": missing
+    }
+
+# -----------------------------------
+# CV IMPROVEMENT SUGGESTIONS
+# -----------------------------------
+def cv_improvements(missing_skills):
+    suggestions = []
+    for skill in missing_skills:
+        suggestions.append(
+            f"Add a bullet point demonstrating hands-on experience or learning in **{skill}**."
+        )
+    return suggestions
+
+# -----------------------------------
+# COVER LETTER
+# -----------------------------------
+def generate_cover_letter(cv_text, jd_text):
+    prompt = f"""
+    Write a concise, professional cover letter tailored to the job description.
+    Emphasize transferable skills and growth mindset.
+
+    CV:
+    {cv_text}
+
+    Job Description:
+    {jd_text}
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    return response.choices[0].message.content
+
+# -----------------------------------
+# UI INPUTS
+# -----------------------------------
+jd_text = st.text_area("📌 Paste Job Description", height=220)
+cv_text = st.text_area("📄 Paste Your CV", height=220)
+
+if st.button("🔍 Analyze Fit"):
+    if not jd_text or not cv_text:
+        st.warning("Please paste both the Job Description and your CV.")
+    else:
+        result = analyze_fit(cv_text, jd_text)
+
+        fit_score = result["fit_score"]
+        core_matched = result["core_matched"]
+        missing_core = result["missing_core"]
+
+        # -----------------------------------
+        # RESULTS
+        # -----------------------------------
+        st.subheader("📊 Fit Score")
+        st.metric("Overall Match (%)", fit_score)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("✅ Matched Skills")
+            st.write(core_matched if core_matched else "No strong matches found.")
+
+        with col2:
+            st.subheader("❌ Missing Skills")
+            st.write(missing_core if missing_core else "No major gaps identified.")
+
+        # -----------------------------------
+        # CV IMPROVEMENT SUGGESTIONS
+        # -----------------------------------
+        st.subheader("🛠 CV Improvement Suggestions")
+        for tip in cv_improvements(missing_core):
+            st.write(f"- {tip}")
+
+        # -----------------------------------
+        # RECRUITER TALKING POINTS
+        # -----------------------------------
+        st.subheader("💬 Recruiter Talking Points")
+
+        for skill in core_matched:
+            st.write(f"- Proven experience with **{skill}**, aligned with role requirements.")
+
+        for skill in missing_core:
+            st.write(f"- Actively developing proficiency in **{skill}**.")
+
+        # -----------------------------------
+        # COVER LETTER
+        # -----------------------------------
+        st.subheader("✉️ Generated Cover Letter")
+        st.write(generate_cover_letter(cv_text, jd_text))
