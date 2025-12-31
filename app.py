@@ -1,171 +1,182 @@
 import streamlit as st
 import openai
+import json
 import re
 
-# ----------------------------
+# -----------------------------
 # CONFIG
-# ----------------------------
-st.set_page_config(
-    page_title="Job Application Intelligence Engine",
-    page_icon="📄",
-    layout="wide"
-)
+# -----------------------------
+st.set_page_config(page_title="Job Application Intelligence Engine", layout="wide")
 
-st.title("📊 Job Application Intelligence Engine")
-st.write("Analyze your CV against any Job Description and get recruiter-ready insights.")
+st.title("🧠 Job Application Intelligence Engine")
+st.caption("AI-powered analysis of CVs vs Job Descriptions")
 
-# OpenAI API Key (Streamlit Secrets)
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# -----------------------------
+# API KEY
+# -----------------------------
+openai.api_key = st.secrets.get("OPENAI_API_KEY")
 
-# ----------------------------
-# SKILL EXTRACTION LOGIC
-# ----------------------------
-def extract_skills(text):
-    text = text.lower()
+if not openai.api_key:
+    st.error("❌ OpenAI API key not found. Add it in Streamlit Secrets.")
+    st.stop()
 
-    skill_keywords = [
-        # Marketing / Sales
-        "email marketing", "klaviyo", "hubspot", "salesforce", "crm",
-        "funnels", "flows", "a/b testing", "segmentation", "lead generation",
-        "copywriting", "conversion optimization", "campaign management",
+# -----------------------------
+# INPUTS
+# -----------------------------
+job_description = st.text_area("📄 Paste Job Description", height=250)
+cv_text = st.text_area("📄 Paste Your CV", height=250)
 
-        # Tech / Data
-        "python", "sql", "excel", "pandas", "automation", "api",
-        "machine learning", "ai", "data analysis",
+analyze_btn = st.button("🔍 Analyze Fit")
 
-        # Ops / General
-        "project management", "stakeholder management", "communication",
-        "analytics", "reporting", "strategy", "presentation"
-    ]
-
-    found = set()
-    for skill in skill_keywords:
-        if re.search(rf"\b{re.escape(skill)}\b", text):
-            found.add(skill)
-
-    return found
-
-
-# ----------------------------
-# FIT SCORE CALCULATION
-# ----------------------------
-def calculate_fit(job_skills, cv_skills):
-    if not job_skills:
-        return 0.0, set(), job_skills
-
-    matched = job_skills.intersection(cv_skills)
-    missing = job_skills.difference(cv_skills)
-
-    score = round((len(matched) / len(job_skills)) * 100, 1)
-    return score, matched, missing
-
-
-# ----------------------------
-# GPT INSIGHTS
-# ----------------------------
-def gpt_insights(score, matched, missing, job_desc):
+# -----------------------------
+# GPT: Extract JD Intelligence
+# -----------------------------
+def extract_jd_intelligence(jd_text):
     prompt = f"""
 You are a senior recruiter.
 
-Job Description:
-{job_desc}
+From the job description below, extract structured hiring requirements.
 
-Candidate Fit Score: {score}/100
+Return STRICT JSON with:
+- core_skills (list)
+- tools (list)
+- soft_skills (list)
+- experience_level (string)
 
-Matched skills:
-{list(matched)}
-
-Missing skills:
-{list(missing)}
-
-Provide:
-1. Clear explanation of the score
-2. CV improvement suggestions
-3. How the candidate should position themselves
-4. Recruiter talking points
-5. A short tailored cover letter
+JOB DESCRIPTION:
+{jd_text}
 """
 
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You extract structured hiring requirements."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0
+    )
+
+    content = response.choices[0].message.content
+    return json.loads(content)
+
+# -----------------------------
+# MATCHING LOGIC
+# -----------------------------
+def normalize(text):
+    return re.sub(r"[^a-z0-9 ]", "", text.lower())
+
+def match_items(source, target_text):
+    matched = []
+    for item in source:
+        if normalize(item) in normalize(target_text):
+            matched.append(item)
+    return matched
+
+def calculate_fit(core, tools, cv):
+    core_matches = match_items(core, cv)
+    tool_matches = match_items(tools, cv)
+
+    score = 0
+    if core:
+        score += (len(core_matches) / len(core)) * 60
+    if tools:
+        score += (len(tool_matches) / len(tools)) * 40
+
+    return round(score, 1), core_matches, tool_matches
+
+# -----------------------------
+# ANALYSIS
+# -----------------------------
+if analyze_btn and job_description and cv_text:
+    with st.spinner("🧠 Analyzing like a recruiter..."):
+        jd_data = extract_jd_intelligence(job_description)
+
+        fit_score, core_matched, tools_matched = calculate_fit(
+            jd_data["core_skills"],
+            jd_data["tools"],
+            cv_text
+        )
+
+        missing_core = list(set(jd_data["core_skills"]) - set(core_matched))
+
+        risk_flags = []
+        if fit_score < 40:
+            risk_flags.append("Low overall alignment")
+        if missing_core:
+            risk_flags.append("Missing key core skills")
+
+    # -----------------------------
+    # OUTPUT
+    # -----------------------------
+    st.subheader("📊 Fit Score")
+    st.metric("Overall Match (%)", fit_score)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("✅ Matched Core Skills")
+        st.write(core_matched or "None")
+
+        st.subheader("🛠 Matched Tools")
+        st.write(tools_matched or "None")
+
+    with col2:
+        st.subheader("❌ Missing Core Skills")
+        st.write(missing_core or "None")
+
+        st.subheader("⚠️ Risk Flags")
+        st.write(risk_flags or "None")
+
+    # -----------------------------
+    # CV IMPROVEMENT SUGGESTIONS
+    # -----------------------------
+    st.subheader("📝 CV Improvement Suggestions")
+
+    improvement_prompt = f"""
+You are a hiring manager.
+
+Job requirements:
+{jd_data}
+
+Candidate CV:
+{cv_text}
+
+Give concise, actionable CV improvement suggestions.
+"""
+
+    improve_resp = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You improve CVs for job alignment."},
+            {"role": "user", "content": improvement_prompt}
+        ],
+        temperature=0.3
+    )
+
+    st.write(improve_resp.choices[0].message.content)
+
+    # -----------------------------
+    # COVER LETTER
+    # -----------------------------
+    st.subheader("✉️ Tailored Cover Letter")
+
+    cover_prompt = f"""
+Write a concise,human, professional cover letter for this job.
+
+Job Description:
+{job_description}
+
+Candidate CV:
+{cv_text}
+"""
+
+    cover_resp = openai.ChatCompletion.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You write recruiter-ready cover letters."},
+            {"role": "user", "content": cover_prompt}
+        ],
         temperature=0.4
     )
 
-    return response["choices"][0]["message"]["content"]
-
-
-# ----------------------------
-# UI INPUTS
-# ----------------------------
-col1, col2 = st.columns(2)
-
-with col1:
-    job_description = st.text_area(
-        "📌 Paste Job Description",
-        height=300,
-        placeholder="Paste the full job description here..."
-    )
-
-with col2:
-    cv_text = st.text_area(
-        "📄 Paste Your CV",
-        height=300,
-        placeholder="Paste your CV content here..."
-    )
-
-analyze = st.button("🚀 Analyze Application")
-
-# ----------------------------
-# RUN ANALYSIS
-# ----------------------------
-if analyze:
-    if not job_description or not cv_text:
-        st.warning("Please paste both a Job Description and a CV.")
-    else:
-        job_skills = extract_skills(job_description)
-        cv_skills = extract_skills(cv_text)
-
-        fit_score, matched, missing = calculate_fit(job_skills, cv_skills)
-
-        st.subheader("📈 Fit Analysis Results")
-
-        st.metric("Fit Score", f"{fit_score}%")
-
-        colA, colB = st.columns(2)
-
-        with colA:
-            st.success("✅ Matched Skills")
-            if matched:
-                for skill in matched:
-                    st.write(f"- {skill}")
-            else:
-                st.write("None detected")
-
-        with colB:
-            st.error("❌ Missing Skills")
-            if missing:
-                for skill in missing:
-                    st.write(f"- {skill}")
-            else:
-                st.write("None")
-
-        st.divider()
-
-        st.subheader("🤖 AI Recruiter Insights")
-
-        with st.spinner("Generating recruiter-level insights..."):
-            insights = gpt_insights(
-                fit_score,
-                matched,
-                missing,
-                job_description
-            )
-
-        st.write(insights)
-
-# ----------------------------
-# FOOTER
-# ----------------------------
-st.divider()
-st.caption("Built by David Idowu | AI Automation & Job Intelligence")
+    st.write(cover_resp.choices[0].message.content)
