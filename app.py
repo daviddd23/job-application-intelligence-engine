@@ -180,3 +180,41 @@ Candidate CV:
     )
 
     st.write(cover_resp.choices[0].message.content)
+    # -----------------------------
+# RECRUITER TALKING POINTS
+# -----------------------------
+st.subheader("🗣️ Recruiter Talking Points")
+
+talking_points_prompt = f"""
+You are a recruiter coaching a candidate.
+
+Job Description:
+{job_description}
+
+Candidate CV:
+{cv_text}
+
+Matched Skills:
+{core_matched}
+
+Missing Skills:
+{missing_core}
+
+Generate 4–5 concise recruiter talking points the candidate can say confidently.
+Each point should:
+- Sound natural
+- Emphasize strengths
+- Address gaps intelligently (without lying)
+"""
+
+talking_resp = openai.ChatCompletion.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "You coach candidates for recruiter conversations."},
+        {"role": "user", "content": talking_points_prompt}
+    ],
+    temperature=0.4
+)
+
+st.write(talking_resp.choices[0].message.content)
+
