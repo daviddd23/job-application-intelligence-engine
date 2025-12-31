@@ -8,7 +8,7 @@ import re
 # -----------------------------
 st.set_page_config(page_title="Job Application Intelligence Engine", layout="wide")
 
-st.title("🧠 Job Application Intelligence Engine")
+st.title("🧠 JOB APPLICATIONINTELLIGENCE ENGINE")
 st.caption("AI-powered analysis of CVs vs Job Descriptions")
 
 # -----------------------------
